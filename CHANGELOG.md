@@ -10,6 +10,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - No durable storage outside the Claude artifact host (`window.storage`): an IndexedDB adapter is only sketched in the source.
 
+## [1.14.0] - 2026
+
+### Changed
+
+- New look (CSS and a few markup hooks only, no behaviour change): softer palette, rounded surfaces, pill tabs, segmented pen control, primary `Open` button, icon in the drop zone. To go back to the previous look, revert the commit "New look (v1.14.0)".
+
 ## [1.13.0] - 2026
 
 ### Fixed
