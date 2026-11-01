@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node (CI tooling only)
+node_modules/
+
+# Local test material: books and annotation sessions must never be committed
+*.pdf
+*.epub
+*.kepub
+*.azw
+*.azw3
+*.mobi
+*.kfx
+*.pfmarker
