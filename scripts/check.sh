@@ -21,7 +21,7 @@ PY
 node --check "$tmp/app.js" && echo "ok   JS syntax"
 
 # 2. Licence identifiers present
-for f in index.html scripts/check.sh; do
+for f in index.html scripts/check.sh start.command assets/icon.svg; do
   grep -q "SPDX-License-Identifier: Apache-2.0" "$f" && echo "ok   SPDX header: $f" \
     || { echo "FAIL missing SPDX Apache-2.0 header: $f"; fail=1; }
 done
@@ -31,7 +31,15 @@ done
 grep -q "Apache License" LICENSE && grep -q "Version 2.0, January 2004" LICENSE \
   && echo "ok   LICENSE is Apache-2.0" || { echo "FAIL LICENSE is not Apache-2.0"; fail=1; }
 
-# 3. No leftover previous licence
+# 3. Launcher and icon assets
+if [ -x start.command ] && head -1 start.command | grep -q '^#!'; then echo "ok   start.command executable with shebang"
+else echo "FAIL start.command missing, not executable, or no shebang"; fail=1; fi
+bash -n start.command && echo "ok   start.command syntax" || { echo "FAIL start.command syntax"; fail=1; }
+for f in assets/icon.svg assets/icon-512.png assets/icon-180.png assets/icon-32.png assets/social-preview.png; do
+  [ -s "$f" ] && echo "ok   present: $f" || { echo "FAIL missing: $f"; fail=1; }
+done
+
+# 4. No leftover previous licence
 if grep -rIl --exclude-dir=.git --exclude=CHANGELOG.md --exclude=check.sh -i "polyform" . ; then
   echo "FAIL leftover PolyForm references (files listed above)"; fail=1
 else

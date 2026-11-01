@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 | Copyright (c) 2025-2026 Flavio Pendolino -->
 
+<p align="center"><img src="assets/icon.svg" width="96" alt="Underline icon"></p>
+
 # Underline
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -24,13 +26,26 @@ Live: https://penfla.github.io/underline/ (after enabling GitHub Pages, see [Dep
 
 ## Usage
 
-Open `index.html` in a browser, or serve it:
+### Quick start (macOS / Linux)
+
+Double-click **`start.command`**. It serves the folder on `127.0.0.1` only (first free port from 8765), opens the app in the default browser, and stops when you close the terminal window. Requires `python3` (preinstalled with the Xcode Command Line Tools on macOS; without it the launcher falls back to opening `index.html` as `file://`, with limited folder access).
+
+First run on macOS, if Gatekeeper blocks a downloaded copy:
+
+```bash
+chmod +x start.command
+xattr -d com.apple.quarantine start.command
+```
+
+or right-click → Open once.
+
+### Manual
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Then open http://localhost:8000, drop a PDF or EPUB, select text, press 1–4.
+Then open http://localhost:8000, drop a PDF or EPUB, select text, press 1–4. A local server (not `file://`) is recommended: the File System Access API and the pdf.js worker need a secure context.
 
 ## Persistence outside the Claude artifact environment
 
@@ -60,11 +75,15 @@ CDN dependencies are pinned by version but not by SRI hash. For a hardened deplo
 
 ## Development
 
-No build step. CI (`scripts/check.sh`) checks JavaScript syntax (`node --check` on the extracted script), license headers, and the absence of leftover licence strings. Run locally:
+No build step. CI (`scripts/check.sh`) checks JavaScript syntax (`node --check` on the extracted script), license headers, the launcher (shebang and executable bit), icon assets, and the absence of leftover licence strings. Run locally:
 
 ```bash
 bash scripts/check.sh
 ```
+
+## Icon
+
+`assets/icon.svg` (source), `assets/icon-512.png`, `icon-180.png`, `icon-32.png`, and `assets/social-preview.png` (1280×640, for Settings → Social preview on GitHub). The mark: text lines, one underlined, with a margin rule: the grade-2 mark. Colour `#2F6F7D`. The SVG is also inlined in `index.html` (favicon and header), so the single file stays self-contained.
 
 ## Third-party components
 
