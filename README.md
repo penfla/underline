@@ -1,0 +1,132 @@
+<!-- SPDX-License-Identifier: Apache-2.0 | Copyright (c) 2025-2026 Flavio Pendolino -->
+
+<p align="center"><img src="assets/icon.svg" width="96" alt="Underline icon"></p>
+
+# Underline
+
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/penfla/underline/actions/workflows/ci.yml/badge.svg)](https://github.com/penfla/underline/actions/workflows/ci.yml)
+
+A tool for underlining important text. A non-destructive annotation layer for PDF and EPUB books, running entirely in the browser as a single HTML file. The book is never uploaded.
+
+Live: https://penfla.github.io/underline/ (after enabling GitHub Pages, see [Deployment](#deployment))
+
+## Features
+
+| Area | Detail |
+|---|---|
+| Formats | PDF with text layer; EPUB 2/3, KEPUB (built-in renderer, no epub.js); DOCX, HTML, Markdown, TXT (converted to one reflowable section). AZW3/MOBI via Calibre conversion; legacy `.doc` must be saved as `.docx`. DRM-protected files are detected and rejected |
+| Importance grades | 1 stroke only; 2 + a margin rule on both sides of the line; 3 + double rule; 4 + double rule and two arrows per side |
+| Shortcuts | with a text or object selected: `1`–`4`, or `Option`/`Alt`+`1`–`4` (also inside EPUB/DOCX/HTML sections) |
+| Stroke | Pencil (colour, weight) or marker (translucent multiply band, full or under-text coverage) |
+| Margin placement | Rules sit beyond the **whole** text line (measured from the document), never beyond the selected part; on multi-column pages each rule follows its column |
+| Non-text objects | Images, tables and vector figures can be selected (click; `Shift`+click inside a table) and graded like text |
+| Layout model | Per file: page/section limits, content box, columns, a box for every text line, coordinates of every image/table/figure. Overlay (`Layout`) and JSON export (`Layout JSON`, geometry only) |
+| Metadata | Optional document information (title, author, date, publisher/source, identifier, annotated by, tags, comment); file-declared values shown as hints |
+| Marks column | Can be hidden (`Marks`); the choice is remembered |
+| Notes | One per mark, from the margin dot or from the list |
+| Persistence | Sessions keyed to the SHA-256 of the file; `.pfmarker` JSON files in a user-chosen folder (File System Access API) |
+| Export | Annotated PDF (original + vector marks + notes appendix; for EPUB the text is reflowed on A4), Markdown, `.pfmarker` |
+| Tabs | Multiple books open at once, independent zoom and save state |
+
+## Usage
+
+### Quick start (macOS / Linux)
+
+Double-click **`start.command`**. It serves the folder on `127.0.0.1` only (first free port from 8765), opens the app in the default browser, and stops when you close the terminal window. Requires `python3` (preinstalled with the Xcode Command Line Tools on macOS; without it the launcher falls back to opening `index.html` as `file://`, with limited folder access).
+
+First run on macOS, if Gatekeeper blocks a downloaded copy:
+
+```bash
+chmod +x start.command
+xattr -d com.apple.quarantine start.command
+```
+
+or right-click → Open once.
+
+### Manual
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open http://localhost:8000, drop a PDF or EPUB, select text, press 1–4. A local server (not `file://`) is recommended: the File System Access API and the pdf.js worker need a secure context.
+
+## Persistence outside the Claude artifact environment
+
+The app uses `window.storage` when the host provides it; otherwise the annotation layer lives **in memory until the tab closes** (a toast says so). For durable sessions in a standalone deployment use one of:
+
+- **Folder…** button: autosave writes `<title>.pfmarker` into a chosen folder (Chromium-based browsers; Safari and Firefox fall back to a download).
+- **`.pfmarker` export / Import** manually.
+- Replace `sGet`/`sSet` with an IndexedDB adapter (a sketch is in the source, section 2). Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## `.pfmarker` format
+
+JSON, schema `pfmarker/1.0`: document fingerprint (`docHash`, SHA-256), settings, and anchors. PDF anchors are page + normalised rectangles; EPUB anchors are section index + DOM node path + offsets, with a TextQuoteSelector-style fallback on the quoted text. Imported files are validated field by field (grade clamped to 1–4, hex colours only, bounded numbers and lengths); invalid marks are discarded.
+
+## Layout model and `Layout JSON`
+
+Measured per page (PDF, at scale 1, points, origin top-left) or per section (reflowable formats, CSS px at the current zoom, origin at the section body):
+
+| Field | Content |
+|---|---|
+| `width`, `height` | file/page/section limit |
+| `content` | box enclosing all lines and objects |
+| `columns` | detected text columns (`x0`, `x1`) |
+| `lines[]` | `x0,y0,x1,y1`, `column`, `chars` for every text line (no text) |
+| `objects[]` | `type` (`image`, `table`, `graphic`, `media`, `rule`, `math`), `x0,y0,x1,y1`; tables add `hlines/vlines` (PDF) or `rows/cols` (reflowable) |
+
+PDF images come from the page's operator list; PDF tables and vector figures are inferred from the painted lines (a table is a connected cluster of ruling lines), so they are a heuristic. Scanned PDFs have no text lines, only a page-sized image.
+
+## Security model
+
+- EPUB sections are sanitised (scripts, iframes, objects, forms, `meta`, `base` removed; `on*` handlers stripped; any URL with a scheme dropped), rendered in `sandbox="allow-same-origin"` iframes with a `default-src 'none'` CSP: no network request can originate from book content.
+- pdf.js runs with `isEvalSupported: false`.
+- No telemetry, no uploads. External requests: the three CDN scripts and the pdf.js worker.
+
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
+## Deployment
+
+GitHub Pages via `.github/workflows/pages.yml`: Settings → Pages → Source: **GitHub Actions**. The workflow publishes `index.html` on every push to `main`.
+
+CDN dependencies are pinned by version but not by SRI hash. For a hardened deployment, vendor the three libraries and add `integrity` attributes.
+
+## Development
+
+No build step. CI (`scripts/check.sh`) checks JavaScript syntax (`node --check` on the extracted script), license headers, the launcher (shebang and executable bit), icon assets, and the absence of leftover licence strings. Run locally:
+
+```bash
+bash scripts/check.sh
+```
+
+## Icon
+
+`assets/icon.svg` (source), `assets/icon-512.png`, `icon-180.png`, `icon-32.png`, and `assets/social-preview.png` (1280×640, for Settings → Social preview on GitHub). The mark: text lines, one underlined, with a margin rule: the grade-2 mark. Colour `#2F6F7D`. The SVG is also inlined in `index.html` (favicon and header), so the single file stays self-contained.
+
+## Third-party components
+
+| Component | Version | License |
+|---|---|---|
+| [pdf.js](https://github.com/mozilla/pdf.js) | 3.11.174 | Apache-2.0 |
+| [JSZip](https://github.com/Stuk/jszip) | 3.10.1 | MIT |
+| [pdf-lib](https://github.com/Hopding/pdf-lib) | 1.17.1 | MIT |
+| [marked](https://github.com/markedjs/marked) | 4.3.0 | MIT |
+
+## References
+
+- W3C Web Annotation Data Model (2017): https://www.w3.org/TR/annotation-model/
+- EPUB 3.3: https://www.w3.org/TR/epub-33/
+- ISO 32000-1 (PDF 1.7): https://www.iso.org/standard/51502.html
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). © 2025-2026 Flavio Pendolino.
+
+Documents generated by the app (Markdown export, notes appendix in the PDF, `.pfmarker`, layout JSON) carry no licence notice. An annotated copy of a book stays subject to the licence of the source work.
+
+**Disclaimer:** validate the results against your own reference samples before any analytical, engineering, safety or regulatory use.
+
+**AI disclosure:** this tool performs deterministic computation; it does not generate content through generative AI (Art. 50 AI Act not applicable).
+
+Author: Flavio Pendolino · Contact: penfla@me.com
