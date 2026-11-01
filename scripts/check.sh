@@ -39,7 +39,11 @@ for f in assets/icon.svg assets/icon-512.png assets/icon-180.png assets/icon-32.
   [ -s "$f" ] && echo "ok   present: $f" || { echo "FAIL missing: $f"; fail=1; }
 done
 
-# 4. No leftover previous licence
+# 4. No licence notice in exports
+if grep -n "CC BY-NC" index.html; then echo "FAIL CC BY-NC notice present in index.html"; fail=1
+else echo "ok   no CC BY-NC notice in exports"; fi
+
+# 5. No leftover previous licence
 if grep -rIl --exclude-dir=.git --exclude=CHANGELOG.md --exclude=check.sh -i "polyform" . ; then
   echo "FAIL leftover PolyForm references (files listed above)"; fail=1
 else

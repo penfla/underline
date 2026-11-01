@@ -8,8 +8,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Open question
 
-- Markdown export and the PDF notes appendix still print "CC BY-NC 4.0". This is a non-free licence applied to output that consists of the user's own selections and notes. Decide whether to drop the notice or replace it with a neutral attribution line.
 - No durable storage outside the Claude artifact host (`window.storage`): an IndexedDB adapter is only sketched in the source.
+
+## [1.13.0] - 2026
+
+### Fixed
+
+- Margin rules were placed from the selection or a guessed column edge, so a partial selection could put them on the text. They are now placed beyond the full extent of the text lines, measured from the document.
+- Column detection ignored pages whose lines are all wide, and could be defeated by a heading crossing the gutter.
+
+### Changed
+
+- Grades 2–4 draw the rules (and, for grade 4, two arrows) on **both** sides of the line.
+- Exports (Markdown, PDF notes appendix) no longer carry a CC BY-NC notice; `.pfmarker` records the generator instead of a licence string.
+- `side` menu renamed `dot`: it now only places the note dot.
+
+### Added
+
+- Layout model per file (limits, content box, columns, line boxes, object coordinates), `Layout` overlay and `Layout JSON` export.
+- Selectable images, tables and figures (PDF and reflowable formats); `Option`/`Alt`+`1`–`4` shortcuts for text and objects.
+- DOCX, HTML, Markdown (marked 4.3.0) and TXT.
+- Optional document information (Info), stored in sessions, exports and PDF properties.
+- Collapsible marks column; clickable drop zone; multiple files at once.
 
 ## [1.12.0] - 2026
 
