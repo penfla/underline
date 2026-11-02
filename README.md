@@ -17,9 +17,9 @@ Live: https://penfla.github.io/underline/ (after enabling GitHub Pages, see [Dep
 |---|---|
 | Formats | PDF with text layer; EPUB 2/3, KEPUB (built-in renderer, no epub.js); DOCX, HTML, Markdown, TXT (converted to one reflowable section). AZW3/MOBI via Calibre conversion; legacy `.doc` must be saved as `.docx`. DRM-protected files are detected and rejected |
 | Importance grades | 1 stroke only; 2 + a margin rule on both sides of the line; 3 + double rule; 4 + double rule and two arrows per side |
-| Shortcuts | with a text or object selected: `1`–`4`, or `Option`/`Alt`+`1`–`4` (also inside EPUB/DOCX/HTML sections) |
+| Shortcuts | with a text or object selected: `1`–`4`, or `Option`/`Alt`+`1`–`4` (also inside EPUB/DOCX/HTML sections); `Option`/`Alt`+`Z` undoes the last operation |
 | Stroke | Pencil (colour, weight) or marker (translucent multiply band, full or under-text coverage) |
-| Margin placement | Rules sit beyond the **whole** text line (measured from the document), never beyond the selected part; on multi-column pages each rule follows its column |
+| Margin placement | Rules sit beyond the **whole** text line (measured from the document), never beyond the selected part; on two- and three-column texts every column is marked on its own: underline, rules and arrows per column |
 | Non-text objects | Images, tables and vector figures can be selected (click; `Shift`+click inside a table) and graded like text |
 | Layout model | Per file: page/section limits, content box, columns, a box for every text line, coordinates of every image/table/figure. Overlay (`Layout`) and JSON export (`Layout JSON`, geometry only) |
 | Metadata | Optional document information (title, author, date, publisher/source, identifier, annotated by, tags, comment); file-declared values shown as hints |

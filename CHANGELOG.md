@@ -10,6 +10,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - No durable storage outside the Claude artifact host (`window.storage`): an IndexedDB adapter is only sketched in the source.
 
+## [1.15.0] - 2026
+
+### Added
+
+- `Option`/`Alt`+`Z` undoes the last operation on marks and document information (new mark, deletion, grade change, note edit, import), up to 100 steps per document.
+
+### Fixed
+
+- Two- and three-column texts: a selection across columns is marked column by column (underline, rules on both sides, arrows), in PDF and in reflowable documents with CSS columns. Fragments of different columns on the same baseline are no longer merged into one underline.
+- Column detection: the minimum gutter is 2% of the width (it missed 3% gutters after bin quantisation), and a heading that crosses the gutter no longer hides it.
+- Reflowable documents: a selection over several paragraphs underlined the paragraph boxes instead of the text lines. Marks and hit tests now use text-line rects only.
+- `Layout JSON` of reflowable documents reports the detected columns.
+
 ## [1.14.0] - 2026
 
 ### Changed

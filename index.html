@@ -3,7 +3,7 @@
      https://www.apache.org/licenses/LICENSE-2.0 -->
 <!--
 Author: Flavio Pendolino
-Version: 1.14.0
+Version: 1.15.0
 License: Apache License 2.0
 Commercial use: permitted under the terms of the Apache License 2.0; contact: penfla@me.com
 Purpose: Underline - A tool for underlining important text. A non-destructive
@@ -368,7 +368,7 @@ body.noindex .index{display:none}
   <span>© 2025-2026 Flavio Pendolino | <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener">Apache-2.0</a></span>
   <span class="spacer"></span>
   <span id="savestate"></span>
-  <span id="stat">v1.14.0</span>
+  <span id="stat">v1.15.0</span>
 </footer>
 
 <div id="ctxmenu">
@@ -434,7 +434,7 @@ const PENCIL_PAL=[['#6B6E72','matita'],['#3B3E41','grafite scura'],['#2E5C8A','b
                   ['#A8382F','rosso'],['#3F7A57','verde']];
 const MARKER_PAL=[['#F3DE6A','giallo'],['#BCE39C','verde'],['#F4B6C6','rosa'],
                   ['#A9D8F0','azzurro'],['#F7C98D','arancio']];
-const SCHEMA='pfmarker/1.0', VERSION='1.14.0';
+const SCHEMA='pfmarker/1.0', VERSION='1.15.0';
 
 /* ============================ 2. persistence ============================ */
 const HAS_STORE=!!(window.storage&&window.storage.get);
@@ -459,7 +459,7 @@ async function sha256(buf){
 
 /* ============================ 3. state ============================ */
 const S={
-  doc:null, raw:null, anns:[], meta:{},
+  doc:null, raw:null, anns:[], meta:{}, undo:[],
   showLayout:false,
   dirty:false, savedAt:null, selected:null,
   settings:{side:'auto',zoom:1},
@@ -717,7 +717,7 @@ function detectColumns(boxes,W){
     else if(st!==null){ runs.push([st,i-1]); st=null; }
   }
   if(st!==null) runs.push([st,BINS-1]);
-  const minGap=Math.round(BINS*0.030);      // narrowest gutter that still separates two columns
+  const minGap=Math.max(3,Math.round(BINS*0.020));   // narrowest gutter that still separates two columns (bins are quantised: ~3% of the width in the worst case)
   const merged=[];
   runs.forEach(r=>{ const last=merged[merged.length-1];
     if(last&&(r[0]-last[1]-1)<minGap) last[1]=r[1]; else merged.push(r.slice()); });
@@ -730,9 +730,9 @@ function detectColumns(boxes,W){
 const KINDLE=/\.(azw3?|mobi|prc|kfx)$/i;
 /* ---- multiple sessions: S holds the active one, the rest live in these objects ---- */
 const SESSIONS=[]; let ACT=-1;
-const FIELDS=['doc','raw','anns','meta','dirty','savedAt','selected','pdf','pages','baseScale','epub','host'];
+const FIELDS=['doc','raw','anns','meta','undo','dirty','savedAt','selected','pdf','pages','baseScale','epub','host'];
 function blankSession(){
-  return {doc:null,raw:null,anns:[],meta:{},dirty:false,savedAt:null,selected:null,
+  return {doc:null,raw:null,anns:[],meta:{},undo:[],dirty:false,savedAt:null,selected:null,
           pdf:null,pages:[],baseScale:1,zoom:1,host:null,
           epub:{info:null,container:null,overlays:new Map(),frames:new Map(),toc:new Map(),
                 urls:new Map(),blobs:[],mounted:new Set(),next:0}};
@@ -1934,6 +1934,22 @@ async function goToSection(idx,then){
 /** Layout model of a reflowable section, in CSS pixels relative to its body: body limits, content box,
     one box per text line (grouped by block and baseline) and the non-text objects. Cached per size. */
 const EP_OBJ='img,svg,canvas,video,audio,table,hr,math,picture,object,embed';
+/** Line-fragment rects of the text inside a range (element boxes excluded). */
+function textRects(range,d){
+  const out=[];
+  let root=range.commonAncestorContainer; if(root.nodeType!==1) root=root.parentNode;
+  const tw=d.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), r=d.createRange();
+  while(tw.nextNode()){
+    const n=tw.currentNode, pe=n.parentElement;
+    if(!pe||!n.nodeValue.trim()||/^(SCRIPT|STYLE|TITLE|NOSCRIPT)$/.test(pe.tagName)||pe.closest('svg[data-ov]')) continue;
+    if(!range.intersectsNode(n)) continue;
+    r.selectNodeContents(n);
+    if(n===range.startContainer) r.setStart(n,range.startOffset);
+    if(n===range.endContainer) r.setEnd(n,range.endOffset);
+    Array.from(r.getClientRects()).forEach(q=>{ if(q.width>0.5&&q.height>1) out.push(q); });
+  }
+  return out;
+}
 function epubLayout(idx){
   const o=S.epub.overlays.get(idx); if(!o) return null;
   const d=o.contents.document, body=d.body, win=d.defaultView;
@@ -1964,17 +1980,34 @@ function epubLayout(idx){
     const rs=Array.from(range.getClientRects()).filter(r=>r.width>0.5&&r.height>1);
     if(!rs.length) continue;
     const b=blockOf(pe); let lst=perBlock.get(b); if(!lst){ lst=[]; perBlock.set(b,lst); }
-    rs.forEach((r,ri)=>{
-      const q={x0:r.left-base.left,y0:r.top-base.top,x1:r.right-base.left,y1:r.bottom-base.top};
-      const yc=(q.y0+q.y1)/2, h=q.y1-q.y0;
-      let l=lst.find(l=>Math.abs((l.y0+l.y1)/2-yc)<=0.5*Math.min(h,l.y1-l.y0));
-      if(l){ l.x0=Math.min(l.x0,q.x0); l.x1=Math.max(l.x1,q.x1); l.y0=Math.min(l.y0,q.y0); l.y1=Math.max(l.y1,q.y1); }
-      else{ l={x0:q.x0,y0:q.y0,x1:q.x1,y1:q.y1,c:0,n:0}; lst.push(l); }
-      l.n+=Math.round(n.nodeValue.length/rs.length);
-    });
+    rs.forEach(r=>lst.push({x0:r.left-base.left,y0:r.top-base.top,x1:r.right-base.left,y1:r.bottom-base.top,
+                            n:Math.round(n.nodeValue.length/rs.length)}));
   }
-  const lines=[]; perBlock.forEach(l=>l.forEach(x=>lines.push(x)));
-  lines.sort((a,b)=>(a.y0-b.y0)||(a.x0-b.x0));
+  // fragments of one block -> lines: same baseline band AND horizontally adjacent. Fragments of the same
+  // band but a column gap apart (CSS columns) stay separate lines.
+  const lines=[];
+  perBlock.forEach(frs=>{
+    const bands=[];
+    frs.forEach(q=>{
+      const yc=(q.y0+q.y1)/2, h=q.y1-q.y0;
+      let bd=bands.find(b=>Math.abs(b.yc-yc)<=0.5*Math.min(h,b.h));
+      if(!bd){ bd={yc,h,items:[]}; bands.push(bd); }
+      bd.items.push(q);
+    });
+    bands.forEach(bd=>{
+      bd.items.sort((a,b)=>a.x0-b.x0);
+      let cur=null;
+      bd.items.forEach(q=>{
+        if(cur&&q.x0<=cur.x1+0.6*Math.min(q.y1-q.y0,cur.y1-cur.y0)){
+          cur.x1=Math.max(cur.x1,q.x1); cur.y0=Math.min(cur.y0,q.y0); cur.y1=Math.max(cur.y1,q.y1); cur.n+=q.n;
+        }else{ cur={x0:q.x0,y0:q.y0,x1:q.x1,y1:q.y1,c:0,n:q.n}; lines.push(cur); }
+      });
+    });
+  });
+  const W=base.width, H=Math.max(body.scrollHeight,base.height,1);
+  const cols=lines.length?detectColumns(lines.map(l=>({x0:l.x0,x1:l.x1})),W):[{l:0,r:W}];
+  lines.forEach(l=>{ l.c=colIndexAt(cols,(l.x0+l.x1)/2); });
+  lines.sort((a,b)=>(a.c-b.c)||(a.y0-b.y0)||(a.x0-b.x0));
   const objects=[];
   Array.from(body.querySelectorAll(EP_OBJ)).forEach(el=>{
     if(el.closest('svg[data-ov]')) return;
@@ -1986,10 +2019,9 @@ function epubLayout(idx){
       ob.cols=el.rows&&el.rows[0]?el.rows[0].cells.length:0; }
     objects.push(ob);
   });
-  const W=base.width, H=Math.max(body.scrollHeight,base.height,1);
   let cx0=1e9,cy0=1e9,cx1=-1e9,cy1=-1e9;
   lines.concat(objects).forEach(b=>{ cx0=Math.min(cx0,b.x0); cy0=Math.min(cy0,b.y0); cx1=Math.max(cx1,b.x1); cy1=Math.max(cy1,b.y1); });
-  o.layout={W,H,lines,objects,cols:[{l:0,r:W}],
+  o.layout={W,H,lines,objects,cols,
             content:lines.length||objects.length?{x0:cx0,y0:cy0,x1:cx1,y1:cy1}:null};
   o.layoutKey=key;
   return o.layout;
@@ -2021,11 +2053,13 @@ function drawEpubSection(idx){
   if(S.showLayout&&lay) drawLayoutOverlay(svg,W,H,lay.content,lay.lines,lay.objects);
   mine.forEach(a=>{
     const range=resolveEpubRange(contents,a); if(!range) return;
-    const rects=mergeRects(Array.from(range.getClientRects()).map(r=>({
-      x:r.left-base.left,y:r.top-base.top,w:r.width,h:r.height})),null);
+    const cols=lay&&lay.cols.length?lay.cols:[{l:0,r:W}];
+    const colOf=cols.length>1?(x=>colIndexAt(cols,x)):null;      // never merge fragments of different columns
+    const rects=mergeRects((a.obj?Array.from(range.getClientRects()):textRects(range,d)).map(r=>({
+      x:r.left-base.left,y:r.top-base.top,w:r.width,h:r.height})),colOf);
     if(a.obj) rects.forEach(r=>{ r.lx0=r.x; r.lx1=r.x+r.w; });
-    attachLines(rects,lay?lay.lines:[],[{l:0,r:W}]);
-    drawMark(svg,a,markGeometry(a,rects,[{l:0,r:W}],W,side,u),u,frameOff);
+    attachLines(rects,lay?lay.lines:[],cols);
+    drawMark(svg,a,markGeometry(a,rects,cols,W,side,u),u,frameOff);
   });
   if(pend){
     const r=pend.range.getBoundingClientRect();
@@ -2081,7 +2115,7 @@ document.addEventListener('mouseup',e=>{
     const n=+pageEl.dataset.page, st=S.pages[n-1];
     const pr=pageEl.getBoundingClientRect();
     const cols=colsPx(st,1);   // normalised columns: threshold in [0,1] coordinates
-    const colOf=x=>{ let i=cols.findIndex(c=>x>=c.l&&x<=c.r); return i<0?-1:i; };
+    const colOf=x=>colIndexAt(cols,x);
     const rects=mergeRects(Array.from(range.getClientRects()).map(r=>({
       x:(r.left-pr.left)/pr.width,y:(r.top-pr.top)/pr.height,
       w:r.width/pr.width,h:r.height/pr.height})),colOf);
@@ -2128,6 +2162,7 @@ function findSuperseded(p){
 
 function addAnnotation(grade){
   const p=S.pending; if(!p){ toast('Select some text first.'); return; }
+  pushUndo('new mark');
   const marker=S.pen.mode==='marker';
   const a={id:'a'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
            grade,created:new Date().toISOString(),quote:p.quote||'',note:'',
@@ -2151,6 +2186,22 @@ function addAnnotation(grade){
   else{ drawEpubSection(p.section); try{p.contents.window.getSelection().removeAllRanges();}catch(e){} }
   S.pending=null; picker.classList.remove('show');
   renderList(); saveDoc();
+}
+/* ---- undo (Option/Alt+Z): snapshots of marks and document information, per document ---- */
+function pushUndo(label){
+  if(!S.doc) return;
+  S.undo.push({label,json:JSON.stringify({anns:S.anns,meta:S.meta})});
+  if(S.undo.length>100) S.undo.shift();
+}
+function undo(){
+  if(!S.doc){ return; }
+  if(!S.undo.length){ toast('Nothing to undo.'); return; }
+  const u=S.undo.pop(), snap=JSON.parse(u.json);
+  S.anns=sanitizeAnns(snap.anns); S.meta=sanitizeMeta(snap.meta); applyTitle();
+  S.selected=null; S.pending=null; npCurrent=null;
+  $('#notepop').classList.remove('show'); picker.classList.remove('show'); closeCtx();
+  redrawAll(); renderList(); refreshChrome(); renderTabs(); saveDoc();
+  toast('Undone: '+u.label+'.');
 }
 function repaint(a){ if(a.page) drawPdfPage(a.page); else drawEpubSection(a.section); }
 function byId(id){ return S.anns.find(a=>a.id===id)||null; }
@@ -2182,7 +2233,7 @@ function hitAnnEpub(contents,cx,cy){
     if(a._bx!==undefined&&Math.hypot(x-a._bx,y-a._by)<=(a._br||5)+6) return a;
   for(const a of list){
     const r=resolveEpubRange(contents,a); if(!r) continue;
-    for(const q of Array.from(r.getClientRects()))
+    for(const q of (a.obj?Array.from(r.getClientRects()):textRects(r,d)))
       if(cx>=q.left-4&&cx<=q.right+4&&cy>=q.top-2&&cy<=q.bottom+6) return a;
   }
   return null;
@@ -2197,7 +2248,7 @@ function openCtx(ann,x,y){
   [1,2,3,4].forEach(n=>{
     const b=document.createElement('button'); b.textContent=n; b.title='grade '+n;
     b.classList.toggle('on',ann.grade===n);
-    b.addEventListener('click',()=>{ ann.grade=n; repaint(ann); renderList(); saveDoc(); closeCtx(); });
+    b.addEventListener('click',()=>{ if(ann.grade!==n) pushUndo('grade changed'); ann.grade=n; repaint(ann); renderList(); saveDoc(); closeCtx(); });
     g.appendChild(b);
   });
   ctx.classList.add('show');
@@ -2208,6 +2259,7 @@ function openCtx(ann,x,y){
 function closeCtx(){ $('#ctxmenu').classList.remove('show'); }
 function removeAnnotation(id){
   const i=S.anns.findIndex(a=>a.id===id); if(i<0) return;
+  pushUndo('mark deleted');
   const a=S.anns[i]; S.anns.splice(i,1);
   if(S.selected===id) S.selected=null;
   if(npCurrent&&npCurrent.id===id){ npCurrent=null; $('#notepop').classList.remove('show'); }
@@ -2215,6 +2267,7 @@ function removeAnnotation(id){
 }
 function cycleGrade(id){
   const a=S.anns.find(x=>x.id===id); if(!a) return;
+  pushUndo('grade changed');
   a.grade=a.grade%4+1; repaint(a); renderList(); saveDoc();
 }
 
@@ -2277,7 +2330,7 @@ function editNote(a,container,target){
   ta.value=a.note||''; ta.placeholder='Note…';
   container.replaceChild(ta,target);
   ta.focus(); ta.selectionStart=ta.value.length;
-  const commit=()=>{ a.note=ta.value.trim(); renderList(); saveDoc(); };
+  const commit=()=>{ if((a.note||'')!==ta.value.trim()) pushUndo('note edited'); a.note=ta.value.trim(); renderList(); saveDoc(); };
   ta.addEventListener('blur',commit);
   ta.addEventListener('keydown',e=>{
     if(e.key==='Escape'){ ta.value=a.note||''; ta.blur(); }
@@ -2506,6 +2559,7 @@ function importJson(file){
       if(d.format&&d.format!=='pfmarker') throw 0;
       if(S.doc&&d.docHash&&d.docHash!=='sha256:'+S.doc.hash)
         toast('Fingerprint differs from the open document: the marks may not attach.',5000);
+      pushUndo('import');
       const ids=new Set(S.anns.map(a=>a.id));
       const clean=sanitizeAnns(d.anchors);
       const im=sanitizeMeta(d.meta);
@@ -2950,6 +3004,7 @@ function openNotePop(ann,x,y){
 function closeNotePop(){ npEl.classList.remove('show'); npCurrent=null; }
 function commitNote(text){
   if(!npCurrent) return;
+  if((npCurrent.note||'')!==(text||'').trim()) pushUndo('note edited');
   npCurrent.note=(text||'').trim();
   repaint(npCurrent); renderList(); saveDoc(); closeNotePop();
 }
@@ -3039,8 +3094,8 @@ async function exportLayout(){
       const lay=epubLayout(i); if(!lay) continue;
       const bx=b=>({x0:r2(b.x0),y0:r2(b.y0),x1:r2(b.x1),y1:r2(b.y1)});
       out.pages.push({n:i+1,section:ep.info.spine[i].path,label:ep.toc.get(i)||'',width:r2(lay.W),height:r2(lay.H),
-        content:lay.content?bx(lay.content):null,columns:[{x0:0,x1:r2(lay.W)}],
-        lines:lay.lines.map(l=>Object.assign(bx(l),{column:0,chars:l.n})),
+        content:lay.content?bx(lay.content):null,columns:lay.cols.map(c=>({x0:r2(c.l),x1:r2(c.r)})),
+        lines:lay.lines.map(l=>Object.assign(bx(l),{column:l.c,chars:l.n})),
         objects:lay.objects.map(o=>Object.assign({type:o.t},bx(o),o.t==='table'?{rows:o.rows,cols:o.cols}:{}))});
     }
   }
@@ -3065,6 +3120,7 @@ function openInfo(){
   $('#mi_save').addEventListener('click',()=>{
     const v={}; F.forEach(([k])=>{ v[k]=$('#mi_'+k).value; });
     v.tags=$('#mi_tags').value; v.comment=$('#mi_comment').value;
+    pushUndo('document information');
     S.meta=sanitizeMeta(v); applyTitle();
     refreshChrome(); renderTabs(); renderList(); saveDoc(); closeModal();
     toast('Document information saved.',2200);
@@ -3080,6 +3136,7 @@ $('#sidesel').addEventListener('change',e=>{ S.settings.side=e.target.value; red
 function onKey(e){
   if(e.target&&/^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName)) return;
   if((e.metaKey||e.ctrlKey)&&String(e.key).toLowerCase()==='s'){ e.preventDefault(); flushAll('manual'); return; }
+  if(e.altKey&&!e.metaKey&&!e.ctrlKey&&e.code==='KeyZ'){ e.preventDefault(); undo(); return; }
   // Option/Alt+1..4: grade the current selection (text or object). e.code, because Option+1 types a symbol on macOS.
   const dm=/^(?:Digit|Numpad)([1-4])$/.exec(e.code||'');
   if(e.altKey&&!e.metaKey&&!e.ctrlKey&&dm&&S.pending){ e.preventDefault(); addAnnotation(+dm[1]); return; }
@@ -3140,6 +3197,7 @@ still mark grade 4.</p>
 <li>Select the text, then click 1&ndash;4 in the box that appears, or press
 <kbd>1</kbd>&ndash;<kbd>4</kbd>, or <kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>1</kbd>&ndash;<kbd>4</kbd>.
 The same shortcuts grade a selected object (see <em>Images, tables and other objects</em>).</li>
+<li><kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>Z</kbd> undoes the last operation on the marks (new mark, deletion, grade change, note, import, document information), up to 100 steps per document while the tab stays open. Typing in a text box keeps its own undo.</li>
 <li>In the list on the right: click the quotation to jump to it, click the glyph to change
 grade, <code>&times;</code> to delete.</li>
 <li><strong>Notes, on the page</strong>: every mark carries a dot in the margin, just beyond the
@@ -3165,7 +3223,9 @@ marks; existing ones keep their own.</li>
 <h3>Where the margin rules go</h3>
 <p>The rules sit on both sides of the text, always beyond the <em>whole</em> line, not beyond the part
 you selected: the selection only decides the underline or the highlighter band. Lines are measured from
-the document itself (see <em>Layout</em>), so on multi-column pages each rule follows its own column.
+the document itself (see <em>Layout</em>). On two- and three-column texts a selection that runs across
+columns is marked <em>column by column</em>: each column gets its own underline and its own rules on both
+sides, as tall as the lines selected in that column.
 The <em>dot</em> menu chooses which side carries the note dot: <code>auto</code> alternates by page
 (odd right, even left).</p>
 
@@ -3295,6 +3355,7 @@ exported PDF may shift.</li>
 
 <h3>Versions</h3>
 <table>
+<tr><td>1.15.0</td><td>two- and three-column texts: underline, margin rules on both sides and arrows are drawn column by column, in PDF and in reflowable documents with CSS columns; marks over several paragraphs underline text lines only; Option/Alt+Z undoes the last operation</td></tr>
 <tr><td>1.14.0</td><td>new look: softer palette, rounded surfaces, pill tabs and segmented pen control, icon in the drop zone; no behaviour change</td></tr>
 <tr><td>1.13.0</td><td>margin rules on both sides of the whole line; Option/Alt+1&ndash;4 shortcuts; selectable images, tables and figures; layout model (file limits, lines, objects) with overlay and JSON export; DOCX, HTML, Markdown and TXT; document information; collapsible marks column; clickable drop zone; no licence notice in exports</td></tr>
 <tr><td>1.12.0</td><td>app icon (favicon and header mark); <code>start.command</code> double-click launcher; relicensed under Apache-2.0</td></tr>
