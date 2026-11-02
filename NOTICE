@@ -1,0 +1,13 @@
+Underline
+Copyright (c) 2025-2026 Flavio Pendolino
+https://github.com/penfla/underline
+
+This product includes software developed by Flavio Pendolino.
+
+Third-party components, loaded at runtime from cdnjs
+(https://cdnjs.cloudflare.com) and not redistributed in this repository:
+
+  pdf.js 3.11.174   Apache-2.0   Mozilla Foundation        https://github.com/mozilla/pdf.js
+  JSZip 3.10.1      MIT          Stuart Knightley et al.   https://github.com/Stuk/jszip
+  pdf-lib 1.17.1    MIT          Andrew Dillon             https://github.com/Hopding/pdf-lib
+  marked 4.3.0      MIT          Christopher Jeffrey et al. https://github.com/markedjs/marked

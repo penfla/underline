@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Underline version
+      description: Shown bottom right, e.g. v1.11.0
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 130 / macOS 15
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: File type
+      options: [PDF, EPUB 2, EPUB 3, KEPUB, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behaviour
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: "Do not attach copyrighted books. For security issues use SECURITY.md instead of this form."
