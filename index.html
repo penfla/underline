@@ -3,7 +3,7 @@
      https://www.apache.org/licenses/LICENSE-2.0 -->
 <!--
 Author: Flavio Pendolino
-Version: 1.15.0
+Version: 1.16.0
 License: Apache License 2.0
 Commercial use: permitted under the terms of the Apache License 2.0; contact: penfla@me.com
 Purpose: Underline - A tool for underlining important text. A non-destructive
@@ -253,6 +253,12 @@ footer a:hover{color:var(--accent-ink)}
 .sheet table td:first-child{width:34%;color:var(--fg);font-weight:500}
 .sheet table td:last-child{color:#4A5257}
 
+body.region .page{cursor:crosshair}
+body.region .tlayer{pointer-events:none}
+body.region .epub-sec iframe{cursor:crosshair}
+.libitem span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.libitem .libdel{color:#A9B1B6;font-size:16px;line-height:1;padding:0 6px;border-radius:5px}
+.libitem .libdel:hover{color:#C0463A;background:#FBECEA}
 body.noindex{grid-template-columns:78px 1fr 0}
 body.noindex .index{display:none}
 .form{display:grid;grid-template-columns:140px 1fr;gap:10px 14px;align-items:center}
@@ -288,6 +294,11 @@ body.noindex .index{display:none}
     <input type="color" id="penhex" value="#6B6E72" title="custom colour">
     <select class="mini" id="penopt" title="stroke option"></select>
   </div>
+  <div class="hgroup" id="framegroup">
+    <label for="framehex" title="frame grade (5 / F)">frame</label>
+    <input type="color" id="framehex" value="#C2762B" title="frame colour">
+    <select class="mini" id="frameopt" title="frame thickness in pt"></select>
+  </div>
 
   <select class="mini" id="chapsel" title="go to section" hidden></select>
 
@@ -308,6 +319,7 @@ body.noindex .index{display:none}
 
   <button class="hbtn primary" id="openbtn">Open</button>
   <button class="hbtn" id="infobtn" title="document information (all fields optional)" disabled>Info</button>
+  <button class="hbtn" id="regbtn" title="drag a rectangle over a table, chart or image (R)">Region</button>
   <button class="hbtn" id="laybtn" title="show the detected file limits, text lines and objects">Layout</button>
   <button class="hbtn" id="guidebtn">Guide</button>
   <button class="hbtn" id="licbtn">Licence</button>
@@ -368,12 +380,13 @@ body.noindex .index{display:none}
   <span>© 2025-2026 Flavio Pendolino | <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener">Apache-2.0</a></span>
   <span class="spacer"></span>
   <span id="savestate"></span>
-  <span id="stat">v1.15.0</span>
+  <span id="stat">v1.16.0</span>
 </footer>
 
 <div id="ctxmenu">
   <div class="q"></div>
   <div class="grades" id="ctxgrades"></div>
+  <div class="grades" id="ctxframe" hidden></div>
   <button data-act="note">Note…</button>
   <button data-act="del" class="rm">Delete mark</button>
 </div>
@@ -434,23 +447,63 @@ const PENCIL_PAL=[['#6B6E72','matita'],['#3B3E41','grafite scura'],['#2E5C8A','b
                   ['#A8382F','rosso'],['#3F7A57','verde']];
 const MARKER_PAL=[['#F3DE6A','giallo'],['#BCE39C','verde'],['#F4B6C6','rosa'],
                   ['#A9D8F0','azzurro'],['#F7C98D','arancio']];
-const SCHEMA='pfmarker/1.0', VERSION='1.15.0';
+const SCHEMA='pfmarker/1.0', VERSION='1.16.0';
 
 /* ============================ 2. persistence ============================ */
-const HAS_STORE=!!(window.storage&&window.storage.get);
-const mem=new Map();
+const HAS_STORE=!!(window.storage&&window.storage.get);     // storage provided by the Claude host
+const mem=new Map();                                         // last-resort fallback
+let STORE_KIND=HAS_STORE?'host':'idb';                       // 'host' | 'idb' | 'mem'
+let idbP=null;
+/** Opens IndexedDB once; null when the browser refuses it (some private modes, file:// in Safari). */
+function idb(){
+  if(!idbP){
+    idbP=new Promise((res,rej)=>{
+      try{
+        const q=indexedDB.open('underline',1);
+        q.onupgradeneeded=()=>q.result.createObjectStore('kv');
+        q.onsuccess=()=>res(q.result);
+        q.onerror=()=>rej(q.error);
+        q.onblocked=()=>rej(new Error('IndexedDB blocked'));
+      }catch(e){ rej(e); }
+    }).catch(e=>{ console.warn('IndexedDB unavailable',e); STORE_KIND='mem'; return null; });
+  }
+  return idbP;
+}
+function idbDo(db,mode,fn){
+  return new Promise((res,rej)=>{
+    const tx=db.transaction('kv',mode); const r=fn(tx.objectStore('kv'));
+    tx.oncomplete=()=>res(r&&r.result); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error);
+  });
+}
 async function sGet(k){
-  if(!HAS_STORE) return mem.has(k)?JSON.parse(mem.get(k)):null;
-  try{ const r=await window.storage.get(k); return r&&r.value?JSON.parse(r.value):null; }catch(e){ return null; }
+  if(HAS_STORE){
+    try{ const r=await window.storage.get(k); return r&&r.value?JSON.parse(r.value):null; }catch(e){ return null; }
+  }
+  const db=await idb();
+  if(db){
+    try{ const v=await idbDo(db,'readonly',st=>st.get(k)); return v==null?null:JSON.parse(v); }
+    catch(e){ console.warn('idb get',e); }
+  }
+  return mem.has(k)?JSON.parse(mem.get(k)):null;
 }
 async function sSet(k,v){
   const s=JSON.stringify(v);
-  if(!HAS_STORE){ mem.set(k,s); return true; }
-  try{ return !!(await window.storage.set(k,s)); }catch(e){ console.error('storage.set',e); return false; }
+  if(HAS_STORE){
+    try{ return !!(await window.storage.set(k,s)); }catch(e){ console.error('storage.set',e); return false; }
+  }
+  const db=await idb();
+  if(db){
+    try{ await idbDo(db,'readwrite',st=>st.put(s,k)); return true; }
+    catch(e){ console.error('idb set',e); STORE_KIND='mem'; }
+  }
+  mem.set(k,s); return true;
 }
-/* Standalone deployment: swap sGet/sSet for an IndexedDB adapter.
-   const db=await new Promise(r=>{const q=indexedDB.open('ul',1);
-     q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>r(q.result);}); */
+async function sDel(k){
+  if(HAS_STORE){ try{ if(window.storage.delete) await window.storage.delete(k); }catch(e){} return; }
+  const db=await idb();
+  if(db){ try{ await idbDo(db,'readwrite',st=>st.delete(k)); }catch(e){ console.warn('idb delete',e); } }
+  mem.delete(k);
+}
 const DKEY=h=>'doc:'+h.slice(0,16), LKEY='lib:index';
 async function sha256(buf){
   const d=await crypto.subtle.digest('SHA-256',buf);
@@ -463,8 +516,9 @@ const S={
   showLayout:false,
   dirty:false, savedAt:null, selected:null,
   settings:{side:'auto',zoom:1},
-  pen:{mode:'pencil',pencil:{color:PENCIL,w:0.8},marker:{color:'#F3DE6A',coverage:'full'}},
-  filter:{1:true,2:true,3:true,4:true},
+  pen:{mode:'pencil',pencil:{color:PENCIL,w:0.8},marker:{color:'#F3DE6A',coverage:'full'},frame:{color:'#C2762B',w:2}},
+  filter:{1:true,2:true,3:true,4:true,5:true},
+  regionMode:false,
   pending:null,
   pdf:null, pages:[], baseScale:1,
   epub:{info:null,container:null,overlays:new Map(),frames:new Map(),toc:new Map(),
@@ -484,6 +538,12 @@ function glyph(grade,w,h,marker){
     r.setAttribute('x',x);r.setAttribute('y',y);r.setAttribute('width',bw);r.setAttribute('height',bh);
     r.setAttribute('fill','currentColor');r.setAttribute('opacity','.30');r.setAttribute('rx','1');
     s.appendChild(r);};
+  if(grade===5){                                   // frame grade: an empty coloured frame
+    const f=document.createElementNS(NS,'rect');
+    f.setAttribute('x','11'); f.setAttribute('y','3'); f.setAttribute('width','26'); f.setAttribute('height','14'); f.setAttribute('rx','1.5');
+    f.setAttribute('fill','none'); f.setAttribute('stroke','currentColor'); f.setAttribute('stroke-width','2.4');
+    s.appendChild(f); return s;
+  }
   if(marker){ band(13.5,5.4,21,4.4); band(13.5,10.4,17,4.4); }
   add('M14 7.5 H34',1.6); add('M14 12.5 H30',1.6);
   if(!marker){ add('M14 9.4 H34'); add('M14 14.4 H30'); }
@@ -509,11 +569,13 @@ function glyph(grade,w,h,marker){
  *   bands = translucent highlighter rectangles {x,y,w,h}
  *   badge = the note dot in the margin {x,y,r}
  */
-function markGeometry(ann,rects,cols,W,side,u){
-  const segs=[],bands=[];
-  if(!rects.length) return {segs,bands,badge:null};
+function markGeometry(ann,rects,cols,W,side,u,pt){
+  const segs=[],bands=[],frames=[];
+  pt=pt||4/3;                                   // px per pt in the target space
+  if(!rects.length) return {segs,bands,frames,badge:null};
   const off=GEO.underlineOffset*u;
-  if(ann.style==='marker'){
+  if(ann.grade===5){ /* frame grade: no stroke on the text itself */ }
+  else if(ann.style==='marker'){
     const under=ann.mstyle==='under';
     const ft=under?MARKER.underTop:MARKER.fullTop, fh=under?MARKER.underH:MARKER.fullH;
     rects.forEach(r=>bands.push({x:r.x-MARKER.bleed*u,y:r.y+r.h*ft,
@@ -549,7 +611,15 @@ function markGeometry(ann,rects,cols,W,side,u){
       if(c2.r<=lx0+1) leftBound=Math.max(leftBound,c2.r);
     });
     let outerR=lx1, outerL=lx0;
-    if(ann.grade>=2){
+    if(ann.grade===5){                           // one frame per column group, thickness in pt
+      const sw=(ann.fw||2)*pt;
+      let fx0=Infinity,fx1=-Infinity,fy0=Infinity,fy1=-Infinity;
+      rs.forEach(r=>{ fx0=Math.min(fx0,r.x); fx1=Math.max(fx1,r.x+r.w); fy0=Math.min(fy0,r.y); fy1=Math.max(fy1,r.y+r.h); });
+      const pad=sw/2+(ann.obj?0:2*u);            // the border sits outside the object, not on it
+      frames.push({x:fx0-pad,y:fy0-pad,w:fx1-fx0+2*pad,h:fy1-fy0+2*pad,sw});
+      outerR=fx1+pad+sw/2; outerL=fx0-pad-sw/2;
+    }
+    if(ann.grade>=2&&ann.grade<=4){
       const R=place(lx1,1,rightBound-lx1), L=place(lx0,-1,lx0-leftBound);
       outerR=sideRules(segs,R.x0,1,R.k,top,bot,ann.grade);   // right of the line
       outerL=sideRules(segs,L.x0,-1,L.k,top,bot,ann.grade);  // left of the line
@@ -559,7 +629,7 @@ function markGeometry(ann,rects,cols,W,side,u){
       badge={x:(dir>0?outerR:outerL)+dir*7.5*u,y:(top+bot)/2,r:4.4*u};
     }
   });
-  return {segs,bands,badge};
+  return {segs,bands,frames,badge};
 }
 /** One side of the margin marks: 1 rule (grade 2), 2 rules (3), 2 rules + 2 arrows (4). Returns the outermost x. */
 function sideRules(segs,x0,dir,k,top,bot,grade){
@@ -625,6 +695,14 @@ function drawMark(svg,ann,geo,u,frameOff){
     r.setAttribute('fill',ink); r.setAttribute('opacity',MARKER.opacity);
     r.setAttribute('rx',(1.2*u).toFixed(2));
     r.style.mixBlendMode='multiply';
+    svg.appendChild(r);
+  });
+  (geo.frames||[]).forEach(f=>{
+    const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',f.x.toFixed(2)); r.setAttribute('y',f.y.toFixed(2));
+    r.setAttribute('width',Math.max(0,f.w).toFixed(2)); r.setAttribute('height',Math.max(0,f.h).toFixed(2));
+    r.setAttribute('fill','none'); r.setAttribute('stroke',ink); r.setAttribute('stroke-width',f.sw.toFixed(2));
+    r.setAttribute('rx','1'); r.setAttribute('stroke-linejoin','round');
     svg.appendChild(r);
   });
   if(geo.segs.length){
@@ -747,6 +825,7 @@ function anyDirty(){ return S.dirty||SESSIONS.some(s=>s.dirty); }
 function refreshChrome(){
   const has=!!S.doc;
   $('#empty').hidden=has;
+  if(!has) renderLibrary();
   $('#zoomgroup').hidden=!has;
   $('#exppdf').disabled=!has;
   $('#infobtn').disabled=!has;
@@ -873,6 +952,10 @@ async function openFile(file){
       if(Number.isFinite(+rp.pencil.w)) S.pen.pencil.w=Math.min(4,Math.max(0.2,+rp.pencil.w));
       if(HEX.test(String(rp.marker.color||''))) S.pen.marker.color=String(rp.marker.color);
       S.pen.marker.coverage=(rp.marker.coverage==='under')?'under':'full';
+      if(rp.frame){
+        if(HEX.test(String(rp.frame.color||''))) S.pen.frame.color=String(rp.frame.color);
+        if(Number.isFinite(+rp.frame.w)) S.pen.frame.w=Math.min(12,Math.max(0.25,+rp.frame.w));
+      }
     }else if(rp&&rp.color){                       // schema v1.1: matita sola
       if(HEX.test(String(rp.color||''))) S.pen.pencil.color=String(rp.color);
       if(Number.isFinite(+rp.w)) S.pen.pencil.w=Math.min(4,Math.max(0.2,+rp.w));
@@ -1403,7 +1486,7 @@ function drawPdfPage(n){
   }
   S.anns.filter(a=>a.page===n&&S.filter[a.grade]).forEach(a=>{
     const rects=attachLines(pageRects(a,W,H),lines,cols);
-    drawMark(st.svg,a,markGeometry(a,rects,cols,W,side,u),u,null);
+    drawMark(st.svg,a,markGeometry(a,rects,cols,W,side,u,lay&&lay.pw?W/lay.pw:W/612),u,null);
   });
   const p=S.pending;
   if(p&&p.type==='pdf'&&p.page===n&&p.obj){ const r=p.rects[0]; drawPendingBox(st.svg,r.x*W,r.y*H,r.w*W,r.h*H); }
@@ -1829,6 +1912,8 @@ async function mountNext(){
     d.addEventListener('load',fit,true);            // images
     d.addEventListener('mouseup',ev=>onEpubSelect(contents,ev));
     d.addEventListener('keydown',onKey);
+    d.addEventListener('mousedown',ev=>onEpubRegionDown(contents,ev));
+    d.addEventListener('dragstart',ev=>{ if(S.regionMode) ev.preventDefault(); });   // images are draggable by default
     d.addEventListener('mousedown',()=>{ picker.classList.remove('show'); closeCtx(); dropObjPending();
       if(npEl.classList.contains('show')) commitNote(npTa.value); });
     d.addEventListener('contextmenu',ev=>{
@@ -2014,7 +2099,7 @@ function epubLayout(idx){
     const par=el.parentElement&&el.parentElement.closest(EP_OBJ); if(par&&par!==body) return;   // nested: outermost only
     const r=el.getBoundingClientRect(); if(r.width<2||r.height<2) return;
     const t=objKind(el);
-    const ob={t,x0:r.left-base.left,y0:r.top-base.top,x1:r.right-base.left,y1:r.bottom-base.top};
+    const ob={t,el,x0:r.left-base.left,y0:r.top-base.top,x1:r.right-base.left,y1:r.bottom-base.top};
     if(t==='table'){ ob.rows=el.rows?el.rows.length:0;
       ob.cols=el.rows&&el.rows[0]?el.rows[0].cells.length:0; }
     objects.push(ob);
@@ -2059,7 +2144,7 @@ function drawEpubSection(idx){
       x:r.left-base.left,y:r.top-base.top,w:r.width,h:r.height})),colOf);
     if(a.obj) rects.forEach(r=>{ r.lx0=r.x; r.lx1=r.x+r.w; });
     attachLines(rects,lay?lay.lines:[],cols);
-    drawMark(svg,a,markGeometry(a,rects,cols,W,side,u),u,frameOff);
+    drawMark(svg,a,markGeometry(a,rects,cols,W,side,u,4/3),u,frameOff);
   });
   if(pend){
     const r=pend.range.getBoundingClientRect();
@@ -2071,6 +2156,82 @@ function releaseEpub(s){
 }
 
 /* ============================ 10. selection ============================ */
+/* ---- region mode: drag a rectangle over a table, chart or image ---- */
+function toggleRegion(on){
+  S.regionMode=on===undefined?!S.regionMode:!!on;
+  document.body.classList.toggle('region',S.regionMode);
+  $('#regbtn').classList.toggle('on',S.regionMode);
+  if(S.regionMode){
+    picker.classList.remove('show');
+    toast('Region mode: drag a rectangle over a table, chart or image, then grade it. Esc or R to leave.',4500);
+  }else dropObjPending();
+}
+function overlapKind(objects,r){
+  // the detected object that fills most of the rectangle gives the kind; otherwise a plain region
+  const ra=(r.x1-r.x0)*(r.y1-r.y0); let best=null,bi=0;
+  (objects||[]).forEach(o=>{
+    const ix=Math.min(r.x1,o.x1)-Math.max(r.x0,o.x0), iy=Math.min(r.y1,o.y1)-Math.max(r.y0,o.y0);
+    if(ix>0&&iy>0&&ix*iy>bi){ bi=ix*iy; best=o; }
+  });
+  return best&&bi/ra>=0.5?best.t:'region';
+}
+let REG=null;
+stage.addEventListener('mousedown',e=>{
+  if(!S.regionMode||e.button!==0||!S.doc||S.doc.type!=='pdf') return;
+  const pe=e.target.closest?e.target.closest('.page'):null; if(!pe) return;
+  e.preventDefault(); picker.classList.remove('show'); dropObjPending();
+  const pr=pe.getBoundingClientRect(), n=+pe.dataset.page, st=S.pages[n-1];
+  REG={n,pr,st,x0:e.clientX-pr.left,y0:e.clientY-pr.top,x1:e.clientX-pr.left,y1:e.clientY-pr.top,
+       el:svgRect(st.svg,0,0,0,0,'#2F6F7D','6 4','rgba(47,111,125,.12)',1,1.4)};
+});
+document.addEventListener('mousemove',e=>{
+  if(!REG) return;
+  REG.x1=Math.max(0,Math.min(REG.pr.width,e.clientX-REG.pr.left));
+  REG.y1=Math.max(0,Math.min(REG.pr.height,e.clientY-REG.pr.top));
+  const x=Math.min(REG.x0,REG.x1), y=Math.min(REG.y0,REG.y1);
+  REG.el.setAttribute('x',x); REG.el.setAttribute('y',y);
+  REG.el.setAttribute('width',Math.abs(REG.x1-REG.x0)); REG.el.setAttribute('height',Math.abs(REG.y1-REG.y0));
+});
+document.addEventListener('mouseup',()=>{
+  if(!REG) return;
+  const r=REG; REG=null;
+  const W=r.pr.width, H=r.pr.height;
+  const bx={x0:Math.min(r.x0,r.x1)/W,y0:Math.min(r.y0,r.y1)/H,x1:Math.max(r.x0,r.x1)/W,y1:Math.max(r.y0,r.y1)/H};
+  if((bx.x1-bx.x0)*W<10||(bx.y1-bx.y0)*H<10){ drawPdfPage(r.n); return; }   // a click, not a drag
+  const kind=overlapKind(r.st.layout&&r.st.layout.objects,bx);
+  S.pending={type:'pdf',page:r.n,obj:kind,quote:'['+kind+']',rects:[{x:bx.x0,y:bx.y0,w:bx.x1-bx.x0,h:bx.y1-bx.y0}]};
+  drawPdfPage(r.n);
+  showPicker(r.pr.left+(bx.x0+bx.x1)/2*W, r.pr.top+bx.y0*H);
+});
+/** Reflowable documents have no fixed page: a dragged rectangle snaps to the image, table or figure it covers. */
+function onEpubRegionDown(contents,ev){
+  if(!S.regionMode||ev.button!==0) return;
+  ev.preventDefault();
+  const d=contents.document, base=d.body.getBoundingClientRect(), o=S.epub.overlays.get(contents.sectionIndex);
+  if(!o) return;
+  const g={x0:ev.clientX-base.left,y0:ev.clientY-base.top};
+  g.x1=g.x0; g.y1=g.y0;
+  const band=svgRect(o.svg,0,0,0,0,'#2F6F7D','6 4','rgba(47,111,125,.12)',1,1.4);
+  const move=e=>{
+    g.x1=e.clientX-base.left; g.y1=e.clientY-base.top;
+    band.setAttribute('x',Math.min(g.x0,g.x1)); band.setAttribute('y',Math.min(g.y0,g.y1));
+    band.setAttribute('width',Math.abs(g.x1-g.x0)); band.setAttribute('height',Math.abs(g.y1-g.y0));
+  };
+  const up=()=>{
+    d.removeEventListener('mousemove',move); d.removeEventListener('mouseup',up);
+    const r={x0:Math.min(g.x0,g.x1),y0:Math.min(g.y0,g.y1),x1:Math.max(g.x0,g.x1),y1:Math.max(g.y0,g.y1)};
+    drawEpubSection(contents.sectionIndex);
+    if(r.x1-r.x0<10||r.y1-r.y0<10) return;
+    const lay=epubLayout(contents.sectionIndex); let best=null,bi=0;
+    ((lay&&lay.objects)||[]).forEach(ob=>{
+      const ix=Math.min(r.x1,ob.x1)-Math.max(r.x0,ob.x0), iy=Math.min(r.y1,ob.y1)-Math.max(r.y0,ob.y0);
+      if(ix>0&&iy>0){ const ratio=ix*iy/((ob.x1-ob.x0)*(ob.y1-ob.y0)); if(ratio>=0.4&&ix*iy>bi){ bi=ix*iy; best=ob; } }
+    });
+    if(best&&best.el) selectEpubObject(contents,best.el);
+    else toast('No image, table or figure in that area. In reflowable documents a region snaps to the objects it covers.',5000);
+  };
+  d.addEventListener('mousemove',move); d.addEventListener('mouseup',up);
+}
 function repaintPending(p){ if(p.type==='pdf') drawPdfPage(p.page); else drawEpubSection(p.section); }
 /** An object selection lives only until the next click elsewhere. */
 function dropObjPending(){
@@ -2092,7 +2253,7 @@ function pdfObjectAt(pageEl,e){
 }
 document.addEventListener('mouseup',e=>{
   if(picker.contains(e.target)) return;
-  if(!S.doc||S.doc.type!=='pdf') return;
+  if(!S.doc||S.doc.type!=='pdf'||S.regionMode) return;
   setTimeout(()=>{
     const sel=window.getSelection();
     if(!sel||sel.isCollapsed||!sel.rangeCount){
@@ -2167,8 +2328,9 @@ function addAnnotation(grade){
   const a={id:'a'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
            grade,created:new Date().toISOString(),quote:p.quote||'',note:'',
            style:marker?'marker':'pencil',
-           ink:marker?S.pen.marker.color:S.pen.pencil.color,
+           ink:grade===5?S.pen.frame.color:(marker?S.pen.marker.color:S.pen.pencil.color),
            sw:S.pen.pencil.w};
+  if(grade===5) a.fw=S.pen.frame.w;
   if(marker) a.mstyle=S.pen.marker.coverage;
   const old=findSuperseded(p);
   if(old.length){
@@ -2245,12 +2407,21 @@ function openCtx(ann,x,y){
   selectAnn(ann); ctxPos={x,y};
   ctx.querySelector('.q').textContent=trunc(ann.quote,90)||'mark';
   const g=$('#ctxgrades'); g.innerHTML='';
-  [1,2,3,4].forEach(n=>{
-    const b=document.createElement('button'); b.textContent=n; b.title='grade '+n;
+  [1,2,3,4,5].forEach(n=>{
+    const b=document.createElement('button'); b.textContent=n===5?'F':n; b.title=n===5?'frame':'grade '+n;
     b.classList.toggle('on',ann.grade===n);
-    b.addEventListener('click',()=>{ if(ann.grade!==n) pushUndo('grade changed'); ann.grade=n; repaint(ann); renderList(); saveDoc(); closeCtx(); });
+    b.addEventListener('click',()=>{ if(ann.grade!==n) pushUndo('grade changed'); setGrade(ann,n); repaint(ann); renderList(); saveDoc(); closeCtx(); });
     g.appendChild(b);
   });
+  const fr=$('#ctxframe'); fr.innerHTML=''; fr.hidden=ann.grade!==5;
+  if(ann.grade===5){
+    [1,2,3,4,6].forEach(w=>{
+      const b=document.createElement('button'); b.textContent=w+'pt'; b.title='frame thickness '+w+' pt';
+      b.classList.toggle('on',(ann.fw||2)===w);
+      b.addEventListener('click',()=>{ pushUndo('frame thickness'); ann.fw=w; repaint(ann); saveDoc(); closeCtx(); });
+      fr.appendChild(b);
+    });
+  }
   ctx.classList.add('show');
   const w=ctx.offsetWidth||190,h=ctx.offsetHeight||170;
   ctx.style.left=Math.max(6,Math.min(window.innerWidth-w-8,x))+'px';
@@ -2265,10 +2436,15 @@ function removeAnnotation(id){
   if(npCurrent&&npCurrent.id===id){ npCurrent=null; $('#notepop').classList.remove('show'); }
   closeCtx(); repaint(a); renderList(); saveDoc();
 }
+function setGrade(a,n){
+  a.grade=n;
+  if(n===5){ if(!a.fw) a.fw=S.pen.frame.w; a.ink=S.pen.frame.color; }
+}
+function gradeLabel(g){ return g===5?'frame':'grade '+g; }
 function cycleGrade(id){
   const a=S.anns.find(x=>x.id===id); if(!a) return;
   pushUndo('grade changed');
-  a.grade=a.grade%4+1; repaint(a); renderList(); saveDoc();
+  setGrade(a,a.grade%5+1); repaint(a); renderList(); saveDoc();
 }
 
 /* ============================ 11. mark list and notes ============================ */
@@ -2299,7 +2475,7 @@ function renderList(){
   }else{
     for(const a of items) listEl.appendChild(itemRow(a));
   }
-  const c=[1,2,3,4].map(g=>S.anns.filter(x=>x.grade===g).length);
+  const c=[1,2,3,4,5].map(g=>S.anns.filter(x=>x.grade===g).length);
   const notes=S.anns.filter(x=>x.note&&x.note.trim()).length;
   $('#stat').textContent='v'+VERSION+'  ·  '+S.anns.length+' marks ('+c.join('/')+')  ·  '+notes+' notes';
 }
@@ -2313,7 +2489,7 @@ function itemRow(a){
   const q=document.createElement('q'); q.textContent=trunc(a.quote,160);
   q.title='go to mark'; q.addEventListener('click',()=>jumpTo(a));
   const loc=document.createElement('span'); loc.className='loc';
-  loc.textContent=locLabel(a)+'  ·  grade '+a.grade;
+  loc.textContent=locLabel(a)+'  ·  '+gradeLabel(a.grade);
   mid.append(q,loc);
   const noteEl=document.createElement(a.note?'div':'button');
   noteEl.className=a.note?'note':'addnote';
@@ -2440,11 +2616,24 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='hidden'&&anyDirty()) flushAll('exit');
 });
 async function renderLibrary(){
-  const lib=(await sGet(LKEY))||[];
-  if(!lib.length) return;
-  $('#lib').hidden=false;
-  $('#libitems').innerHTML=lib.slice(0,12).map(x=>
-    '<div class="libitem"><span>'+esc(x.filename)+'</span><span>'+x.count+' marks</span></div>').join('');
+  const lib=(await sGet(LKEY))||[], box=$('#libitems');
+  box.innerHTML='';
+  $('#lib').hidden=!lib.length;
+  lib.slice(0,12).forEach(x=>{
+    const row=document.createElement('div'); row.className='libitem';
+    const a=document.createElement('span'); a.textContent=x.filename;
+    const b=document.createElement('span'); b.textContent=x.count+' marks';
+    const d=document.createElement('button'); d.className='libdel'; d.textContent='×';
+    d.title='forget this saved session (the book itself is not touched)';
+    d.addEventListener('click',async()=>{
+      if(!confirm('Delete the saved session for “'+x.filename+'”?')) return;
+      await sDel(DKEY(x.hash));
+      const cur=((await sGet(LKEY))||[]).filter(e=>e.hash!==x.hash);
+      await sSet(LKEY,cur);
+      renderLibrary();
+    });
+    row.append(a,b,d); box.appendChild(row);
+  });
 }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
@@ -2498,10 +2687,10 @@ function exportMd(){
     '_File `'+S.doc.name+'` · SHA-256 `'+S.doc.hash.slice(0,16)+'…` · '+S.anns.length+' marks_',''];
   ml.forEach(([k,v])=>L.push('- **'+k+':** '+v));
   if(ml.length) L.push('');
-  for(const g of [4,3,2,1]){
+  for(const g of [5,4,3,2,1]){
     const rows=sortAnns().filter(a=>a.grade===g);
     if(!rows.length) continue;
-    L.push('## Grade '+g,'');
+    L.push('## '+(g===5?'Frame':'Grade '+g),'');
     rows.forEach(a=>{
       L.push('> '+(a.quote||'—').replace(/\n+/g,' '),'');
       if(a.note) L.push('**Note.** '+a.note,'');
@@ -2512,13 +2701,13 @@ function exportMd(){
 }
 /** Validates a mark arriving from a file or a stored session: types, ranges, colour. */
 const HEX=/^#[0-9a-fA-F]{6}$/;
-const OBJ_KINDS=['image','table','graphic','media','rule','math','other'];
+const OBJ_KINDS=['image','table','graphic','media','rule','math','other','region'];
 function sanitizeAnn(a){
   if(!a||typeof a!=='object') return null;
   const num=(v,d)=>Number.isFinite(+v)?+v:d;
   const o={
     id:String(a.id||('a'+Math.random().toString(36).slice(2,10))).slice(0,64),
-    grade:Math.min(4,Math.max(1,Math.round(num(a.grade,1)))),
+    grade:Math.min(5,Math.max(1,Math.round(num(a.grade,1)))),
     created:String(a.created||'').slice(0,40),
     quote:String(a.quote||'').slice(0,4000),
     note:String(a.note||'').slice(0,20000),
@@ -2528,6 +2717,7 @@ function sanitizeAnn(a){
   };
   if(o.style==='marker') o.mstyle=(a.mstyle==='under')?'under':'full';
   if(OBJ_KINDS.includes(a.obj)) o.obj=a.obj;
+  if(o.grade===5) o.fw=Math.min(12,Math.max(0.25,num(a.fw,2)));
   if(Number.isFinite(+a.page)&&Array.isArray(a.rects)){
     o.page=Math.max(1,Math.round(+a.page));
     o.rects=a.rects.slice(0,400).map(r=>({x:num(r&&r.x,0),y:num(r&&r.y,0),
@@ -2602,7 +2792,7 @@ async function exportPdf(){
     const side=sideFor(n);
     S.anns.filter(a=>a.page===n).forEach(a=>{
       const rects=attachLines(pageRects(a,W,H),lines,cols);
-      paintGeo(page,H,a,markGeometry(a,rects,cols,W,side,u),rgb,u);
+      paintGeo(page,H,a,markGeometry(a,rects,cols,W,side,u,1),rgb,u);
     });
   }
   await appendNoteBook(doc,StandardFonts,rgb);
@@ -2655,7 +2845,7 @@ async function appendNoteBook(doc,StandardFonts,rgb){
   for(const a of rows){
     const [r0,g0,b0]=hex2rgb(a.ink||PENCIL);
     nl(16);
-    page.drawText(WINANSI(locLabel(a)+'   grade '+a.grade),{x:M,y,size:8.5,font:bold,color:rgb(r0,g0,b0)});
+    page.drawText(WINANSI(locLabel(a)+'   '+gradeLabel(a.grade)),{x:M,y,size:8.5,font:bold,color:rgb(r0,g0,b0)});
     // grade marker: vertical rules to the left of the block
     const blockTop=y+10;
     const qs=wrap('"'+(a.quote||'')+'"',ital,10.5);
@@ -2663,7 +2853,7 @@ async function appendNoteBook(doc,StandardFonts,rgb){
     if(a.note){ const ns=wrap(a.note,body,10);
       ns.forEach((l,i)=>{ nl(13.5); page.drawText((i===0?'Note. ':'')+l,{x:M+10,y,size:10,font:body,color:rgb(.24,.27,.29)}); }); }
     const blockBot=y-4;
-    for(let i=0;i<Math.max(0,a.grade-1);i++){
+    for(let i=0;i<(a.grade===5?0:Math.max(0,a.grade-1));i++){
       const x=M+2.5*i;
       if(blockTop>blockBot) page.drawLine({start:{x,y:blockTop},end:{x,y:blockBot},
         thickness:0.8,color:rgb(r0,g0,b0)});
@@ -2679,6 +2869,9 @@ function paintGeo(page,H,ann,geo,rgb,u){
   geo.bands.forEach(b=>page.drawRectangle({
     x:b.x, y:H-(b.y+b.h), width:Math.max(0,b.w), height:Math.max(0,b.h),
     color:rgb(r0,g0,b0), opacity:MARKER.opacity, borderWidth:0}));
+  (geo.frames||[]).forEach(f=>page.drawRectangle({
+    x:f.x, y:H-(f.y+f.h), width:Math.max(0,f.w), height:Math.max(0,f.h),
+    borderColor:rgb(r0,g0,b0), borderWidth:f.sw, borderOpacity:1}));
   geo.segs.forEach(s=>page.drawLine({
     start:{x:s[0],y:H-s[1]}, end:{x:s[2],y:H-s[3]},
     thickness:th, color:rgb(r0,g0,b0), opacity:1}));
@@ -2747,7 +2940,7 @@ async function exportEpubPdf(){
   const flushMarks=()=>{
     if(page) pending.forEach(p=>{
       if(!p.rects.length) return;
-      paintGeo(page,H,p.ann,markGeometry(p.ann,p.rects,cols,W,sideFor(pageNo),u),rgb,u);
+      paintGeo(page,H,p.ann,markGeometry(p.ann,p.rects,cols,W,sideFor(pageNo),u,1),rgb,u);
     });
     pending=new Map();
   };
@@ -2925,20 +3118,20 @@ async function chooseFolder(){
 
 /* ============================ 14. UI wiring ============================ */
 const rail=$('#rail'), railBtns=[], pickBtns=[];
-[1,2,3,4].forEach(g=>{
+[1,2,3,4,5].forEach(g=>{
   const b=document.createElement('button'); b.className='gbtn';
-  b.title='Grade '+g+(g===1?' — stroke on the text only':g===2?' — plus a margin rule':g===3?' — plus a double rule':' — plus a double rule and arrows');
+  b.title=(g===5?'Frame':'Grade '+g)+(g===1?' — stroke on the text only':g===2?' — plus a margin rule on both sides':g===3?' — plus a double rule on both sides':g===4?' — plus a double rule and arrows on both sides':' — coloured frame, thickness and colour in the toolbar');
   b.title+='  \u00b7  Option/Alt+'+g;
   b.appendChild(glyph(g,52,26));
-  const n=document.createElement('span'); n.className='num'; n.textContent=g; b.appendChild(n);
+  const n=document.createElement('span'); n.className='num'; n.textContent=g===5?'F':g; b.appendChild(n);
   b.addEventListener('click',()=>addAnnotation(g));
   rail.appendChild(b); railBtns.push(b);
 });
-[1,2,3,4].forEach(g=>{
+[1,2,3,4,5].forEach(g=>{
   const b=document.createElement('button');
-  b.title='Grade '+g+'  \u00b7  Option/Alt+'+g;
+  b.title=(g===5?'Frame':'Grade '+g)+'  \u00b7  Option/Alt+'+g;
   b.appendChild(glyph(g,40,21));
-  const n=document.createElement('span'); n.className='num'; n.textContent=g; b.appendChild(n);
+  const n=document.createElement('span'); n.className='num'; n.textContent=g===5?'F':g; b.appendChild(n);
   b.addEventListener('mousedown',e=>e.preventDefault());
   b.addEventListener('click',()=>addAnnotation(g));
   picker.appendChild(b); pickBtns.push(b);
@@ -2949,11 +3142,12 @@ function refreshGlyphs(){
   pickBtns.forEach((b,i)=>b.replaceChild(glyph(i+1,40,21,m),b.firstChild));
   const col=m?S.pen.marker.color:S.pen.pencil.color;
   railBtns.concat(pickBtns).forEach(b=>b.style.color=col);
+  [railBtns[4],pickBtns[4]].forEach(b=>{ if(b) b.style.color=S.pen.frame.color; });
 }
 const filters=$('#filters');
-[1,2,3,4].forEach(g=>{
-  const c=document.createElement('button'); c.className='fchip on'; c.textContent=g;
-  c.title='show or hide grade '+g;
+[1,2,3,4,5].forEach(g=>{
+  const c=document.createElement('button'); c.className='fchip on'; c.textContent=g===5?'F':g;
+  c.title='show or hide '+(g===5?'frames':'grade '+g);
   c.addEventListener('click',()=>{ S.filter[g]=!S.filter[g]; c.classList.toggle('on',S.filter[g]);
     redrawAll(); renderList(); });
   filters.appendChild(c);
@@ -2978,8 +3172,20 @@ function syncPenUI(){
   opts.forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; penopt.appendChild(o); });
   penopt.value=m?S.pen.marker.coverage:String(S.pen.pencil.w);
   penopt.title=m?'copertura della banda':'spessore del tratto';
+  syncFrameUI();
   refreshGlyphs();
 }
+const frameopt=$('#frameopt');
+[0.5,1,1.5,2,3,4,6,8].forEach(w=>{ const o=document.createElement('option'); o.value=String(w); o.textContent=w+' pt'; frameopt.appendChild(o); });
+function syncFrameUI(){
+  $('#framehex').value=S.pen.frame.color;
+  if(![...frameopt.options].some(o=>+o.value===S.pen.frame.w)){
+    const o=document.createElement('option'); o.value=String(S.pen.frame.w); o.textContent=S.pen.frame.w+' pt'; frameopt.appendChild(o);
+  }
+  frameopt.value=String(S.pen.frame.w);
+}
+$('#framehex').addEventListener('input',e=>{ S.pen.frame.color=e.target.value; refreshGlyphs(); saveDoc(); });
+frameopt.addEventListener('change',e=>{ S.pen.frame.w=parseFloat(e.target.value); saveDoc(); });
 $('#mpencil').addEventListener('click',()=>{ S.pen.mode='pencil'; syncPenUI(); saveDoc(); });
 $('#mmarker').addEventListener('click',()=>{ S.pen.mode='marker'; syncPenUI(); saveDoc(); });
 $('#penhex').addEventListener('input',e=>{ curPen().color=e.target.value; syncPenUI(); saveDoc(); });
@@ -3067,6 +3273,7 @@ $('#laybtn').addEventListener('click',()=>{
 });
 $('#explay').addEventListener('click',()=>{ exportLayout().catch(err=>{ console.error(err); toast('Layout export failed: '+err.message,6000); }); });
 $('#infobtn').addEventListener('click',openInfo);
+$('#regbtn').addEventListener('click',()=>toggleRegion());
 
 /** Coordinates of the file limits, every text line and every non-text object, as JSON (no text content). */
 async function exportLayout(){
@@ -3138,13 +3345,15 @@ function onKey(e){
   if((e.metaKey||e.ctrlKey)&&String(e.key).toLowerCase()==='s'){ e.preventDefault(); flushAll('manual'); return; }
   if(e.altKey&&!e.metaKey&&!e.ctrlKey&&e.code==='KeyZ'){ e.preventDefault(); undo(); return; }
   // Option/Alt+1..4: grade the current selection (text or object). e.code, because Option+1 types a symbol on macOS.
-  const dm=/^(?:Digit|Numpad)([1-4])$/.exec(e.code||'');
+  const dm=/^(?:Digit|Numpad)([1-5])$/.exec(e.code||'');
   if(e.altKey&&!e.metaKey&&!e.ctrlKey&&dm&&S.pending){ e.preventDefault(); addAnnotation(+dm[1]); return; }
   if(e.metaKey||e.ctrlKey||e.altKey) return;
+  if((e.key==='r'||e.key==='R')&&S.doc){ e.preventDefault(); toggleRegion(); return; }
   if((e.key==='Delete'||e.key==='Backspace')&&S.selected){ e.preventDefault(); removeAnnotation(S.selected); return; }
-  if(/^[1-4]$/.test(e.key)&&S.pending){ e.preventDefault(); addAnnotation(+e.key); }
+  if(/^[1-5]$/.test(e.key)&&S.pending){ e.preventDefault(); addAnnotation(+e.key); }
   else if(e.key==='Escape'){
     picker.classList.remove('show'); closeCtx(); selectAnn(null); closeModal();
+    if(S.regionMode) toggleRegion(false);
     const p=S.pending; S.pending=null; if(p&&p.obj) repaintPending(p);
   }
 }
@@ -3175,12 +3384,13 @@ const GUIDE=`
 <p>Open a PDF or an EPUB, select some text, pick an importance grade. The marks live in a
 separate layer: the original file is never touched.</p>
 
-<h3>The four grades</h3>
+<h3>The grades</h3>
 <table>
 <tr><td>Grade 1</td><td>stroke on the text only</td></tr>
 <tr><td>Grade 2</td><td>plus a vertical rule on <em>both</em> sides of the line</td></tr>
 <tr><td>Grade 3</td><td>plus a double vertical rule on both sides</td></tr>
 <tr><td>Grade 4</td><td>plus two arrows on each side, pointing at the text</td></tr>
+<tr><td>Frame (F, 5)</td><td>a coloured frame around the selection, for charts, tables and images as much as for text. Colour and thickness (default 2&nbsp;pt) are set in the toolbar under <em>frame</em>; each mark keeps its own and can be changed from the right-click menu (<code>F</code> converts a mark, the <code>pt</code> row sets the thickness)</td></tr>
 </table>
 
 <h3>Pencil and highlighter</h3>
@@ -3198,6 +3408,7 @@ still mark grade 4.</p>
 <kbd>1</kbd>&ndash;<kbd>4</kbd>, or <kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>1</kbd>&ndash;<kbd>4</kbd>.
 The same shortcuts grade a selected object (see <em>Images, tables and other objects</em>).</li>
 <li><kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>Z</kbd> undoes the last operation on the marks (new mark, deletion, grade change, note, import, document information), up to 100 steps per document while the tab stays open. Typing in a text box keeps its own undo.</li>
+<li><kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>5</kbd> (or <kbd>5</kbd>) applies the frame grade to the selection.</li>
 <li>In the list on the right: click the quotation to jump to it, click the glyph to change
 grade, <code>&times;</code> to delete.</li>
 <li><strong>Notes, on the page</strong>: every mark carries a dot in the margin, just beyond the
@@ -3268,9 +3479,14 @@ embedded page that prompt can be suppressed, so press <kbd>&#8984;/Ctrl+S</kbd> 
 leaving.</p>
 
 <h3>Session persistence</h3>
-<p>The book is never saved and never uploaded. Only the annotation layer is stored, indexed on
-the SHA-256 fingerprint of the file: reopen the same book and the marks come back on their
-own. Renaming the file makes no difference; editing it does.</p>
+<p>The book is never saved and never uploaded. Only the annotation layer is stored, indexed on the SHA-256
+fingerprint of the file: reopen the same book and the marks come back on their own. Renaming the file makes
+no difference; editing it does.</p>
+<p>Sessions are kept in this browser's <strong>IndexedDB</strong> (database <code>underline</code>), or in the
+host's storage when the page runs inside Claude. The start screen lists them, each with a
+<code>&times;</code> to forget it. If the browser refuses IndexedDB (some private modes), sessions live in
+memory until the tab closes and a notice says so. Browsers may clear site data under storage pressure or on
+request: <code>.pfmarker</code> files, or the working folder, are the durable copy.</p>
 
 <h3>More than one book at a time</h3>
 <p>Each open file becomes a tab in the bar below the header: <code>+</code> opens another,
@@ -3327,6 +3543,14 @@ the box that appears or with <kbd>Option</kbd>/<kbd>Alt</kbd>+<kbd>1</kbd>&ndash
 selected by clicking its frame, or with <kbd>Shift</kbd>+click anywhere inside it. In a PDF, tables and
 vector figures are inferred from the painted lines (a heuristic); images come from the file itself.</p>
 
+<h3>Regions</h3>
+<p>Automatic detection of tables and figures is a heuristic, so you can also draw the area yourself:
+press <code>Region</code> in the toolbar (or <kbd>R</kbd>), drag a rectangle over the table, chart or image,
+then grade it or frame it like any selection. If the rectangle mostly covers a detected image, table or
+figure the mark takes that kind, otherwise it is a plain region. The mode stays on until you press
+<kbd>Esc</kbd> or <kbd>R</kbd> again. In reflowable documents (EPUB, DOCX, HTML, Markdown) there is no
+fixed page, so the rectangle snaps to the image, table or figure it covers.</p>
+
 <h3>Layout</h3>
 <p>For every file the app measures the limits of the page or section, the box of every text line, and the
 coordinates of every non-text object. <code>Layout</code> in the toolbar draws them (grey dashed: file
@@ -3355,6 +3579,7 @@ exported PDF may shift.</li>
 
 <h3>Versions</h3>
 <table>
+<tr><td>1.16.0</td><td>frame grade with colour and thickness (default 2&nbsp;pt); region mode to draw a rectangle over tables, charts and images; sessions saved in IndexedDB, with a list on the start screen and a way to forget them</td></tr>
 <tr><td>1.15.0</td><td>two- and three-column texts: underline, margin rules on both sides and arrows are drawn column by column, in PDF and in reflowable documents with CSS columns; marks over several paragraphs underline text lines only; Option/Alt+Z undoes the last operation</td></tr>
 <tr><td>1.14.0</td><td>new look: softer palette, rounded surfaces, pill tabs and segmented pen control, icon in the drop zone; no behaviour change</td></tr>
 <tr><td>1.13.0</td><td>margin rules on both sides of the whole line; Option/Alt+1&ndash;4 shortcuts; selectable images, tables and figures; layout model (file limits, lines, objects) with overlay and JSON export; DOCX, HTML, Markdown and TXT; document information; collapsible marks column; clickable drop zone; no licence notice in exports</td></tr>
@@ -3428,7 +3653,9 @@ $('#guidebtn').addEventListener('click',()=>openModal('Guide',GUIDE));
 $('#licbtn').addEventListener('click',()=>openModal('Licence and attributions',LICENSE));
 
 syncPenUI(); renderList(); renderLibrary(); renderTabs(); refreshChrome(); paintSaveState();
-if(!HAS_STORE) toast('Persistent storage is unavailable: this session lives in memory until the tab closes.',6000);
+if(!HAS_STORE) idb().then(db=>{
+  if(!db) toast('Persistent storage is unavailable in this browser: sessions live in memory until the tab closes. Use the .pfmarker export.',7000);
+});
 })();
 </script>
 </body>

@@ -6,9 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
-### Open question
+## [1.16.0] - 2026
 
-- No durable storage outside the Claude artifact host (`window.storage`): an IndexedDB adapter is only sketched in the source.
+### Added
+
+- Frame grade (`F`, `Option`/`Alt`+`5`): a coloured frame around a selection, object or region. Colour and thickness (default 2 pt) are set in the toolbar; per mark they can be changed from the right-click menu. Exported to PDF as a vector border of the same thickness in pt.
+- Region mode (`Region`, `R`): drag a rectangle over a table, chart or image to grade or frame it. In PDF the rectangle is the mark; in reflowable documents it snaps to the object it covers.
+- IndexedDB adapter: sessions persist in the browser outside the Claude host (database `underline`). The start screen lists saved sessions, each can be forgotten with `×`. Falls back to memory, with a notice, when IndexedDB is refused.
 
 ## [1.15.0] - 2026
 

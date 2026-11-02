@@ -17,13 +17,15 @@ Live: https://penfla.github.io/underline/ (after enabling GitHub Pages, see [Dep
 |---|---|
 | Formats | PDF with text layer; EPUB 2/3, KEPUB (built-in renderer, no epub.js); DOCX, HTML, Markdown, TXT (converted to one reflowable section). AZW3/MOBI via Calibre conversion; legacy `.doc` must be saved as `.docx`. DRM-protected files are detected and rejected |
 | Importance grades | 1 stroke only; 2 + a margin rule on both sides of the line; 3 + double rule; 4 + double rule and two arrows per side |
-| Shortcuts | with a text or object selected: `1`–`4`, or `Option`/`Alt`+`1`–`4` (also inside EPUB/DOCX/HTML sections); `Option`/`Alt`+`Z` undoes the last operation |
+| Shortcuts | with a text or object selected: `1`–`5` (5 = frame), or `Option`/`Alt`+`1`–`5` (also inside EPUB/DOCX/HTML sections); `Option`/`Alt`+`Z` undoes the last operation |
 | Stroke | Pencil (colour, weight) or marker (translucent multiply band, full or under-text coverage) |
 | Margin placement | Rules sit beyond the **whole** text line (measured from the document), never beyond the selected part; on two- and three-column texts every column is marked on its own: underline, rules and arrows per column |
 | Non-text objects | Images, tables and vector figures can be selected (click; `Shift`+click inside a table) and graded like text |
 | Layout model | Per file: page/section limits, content box, columns, a box for every text line, coordinates of every image/table/figure. Overlay (`Layout`) and JSON export (`Layout JSON`, geometry only) |
 | Metadata | Optional document information (title, author, date, publisher/source, identifier, annotated by, tags, comment); file-declared values shown as hints |
 | Marks column | Can be hidden (`Marks`); the choice is remembered |
+| Frame grade | `F` / `Option`+`5`: coloured frame (default 2 pt, colour and thickness adjustable per mark), for charts, tables, images and text; exported as a vector border |
+| Regions | `Region` / `R`: drag a rectangle over a table, chart or image (PDF) or let it snap to the object it covers (reflowable formats) |
 | Notes | One per mark, from the margin dot or from the list |
 | Persistence | Sessions keyed to the SHA-256 of the file; `.pfmarker` JSON files in a user-chosen folder (File System Access API) |
 | Export | Annotated PDF (original + vector marks + notes appendix; for EPUB the text is reflowed on A4), Markdown, `.pfmarker` |
@@ -52,13 +54,17 @@ python3 -m http.server 8000
 
 Then open http://localhost:8000, drop a PDF or EPUB, select text, press 1–4. A local server (not `file://`) is recommended: the File System Access API and the pdf.js worker need a secure context.
 
-## Persistence outside the Claude artifact environment
+## Persistence
 
-The app uses `window.storage` when the host provides it; otherwise the annotation layer lives **in memory until the tab closes** (a toast says so). For durable sessions in a standalone deployment use one of:
+Annotation sessions (never the book) are stored under the SHA-256 of the file:
 
-- **Folder…** button: autosave writes `<title>.pfmarker` into a chosen folder (Chromium-based browsers; Safari and Firefox fall back to a download).
-- **`.pfmarker` export / Import** manually.
-- Replace `sGet`/`sSet` with an IndexedDB adapter (a sketch is in the source, section 2). Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
+| Where the app runs | Storage |
+|---|---|
+| Inside Claude | the host's `window.storage` |
+| Any browser | **IndexedDB**, database `underline`, store `kv` |
+| IndexedDB refused (some private modes) | memory until the tab closes; a notice says so |
+
+Saved sessions are listed on the start screen; `×` forgets one. Browsers can clear site data, so for a durable copy use the **Folder…** button (autosave writes `<title>.pfmarker` into a chosen folder; Chromium-based browsers, others fall back to a download) or the `.pfmarker` export and **Import**.
 
 ## `.pfmarker` format
 
